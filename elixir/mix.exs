@@ -13,6 +13,7 @@ defmodule SymphonyElixir.MixProject do
           threshold: 100
         ],
         ignore_modules: [
+          SymphonyElixir.Asana.Client,
           SymphonyElixir.Config,
           SymphonyElixir.Linear.Client,
           SymphonyElixir.SpecsCheck,

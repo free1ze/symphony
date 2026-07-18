@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Tracker do
   alias SymphonyElixir.Tracker.Issue
 
   @adapters %{
+    "asana" => SymphonyElixir.Asana.Adapter,
     "linear" => SymphonyElixir.Linear.Adapter,
     "memory" => SymphonyElixir.Tracker.Memory
   }

@@ -13,7 +13,7 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 ## How it works
 
-1. Polls the configured tracker for candidate work (the included production adapter is Linear)
+1. Polls the configured tracker for candidate work (included production adapters are Linear and Asana)
 2. Creates a workspace per issue
 3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
    workspace
@@ -21,9 +21,9 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 5. Keeps Codex working on the issue until the work is done
 
 During app-server sessions, the selected tracker adapter may advertise provider-native tools. The
-included Linear adapter serves `linear_graphql` so repo skills can make raw Linear GraphQL calls.
-Symphony executes that tool with its configured auth and removes `LINEAR_API_KEY` from the Codex
-child environment, so the agent does not need a second tracker login.
+Linear adapter serves `linear_graphql`; the Asana adapter serves `asana_api`. Symphony executes
+those tools with configured auth and removes each adapter's declared token environment variables
+from the Codex child, so the agent does not need a second tracker login.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
@@ -169,6 +169,8 @@ Notes:
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - For the Linear adapter, `tracker.provider.api_key` reads from `LINEAR_API_KEY` when unset or
   when value is `$LINEAR_API_KEY`. The legacy flat `tracker.api_key` alias behaves the same way.
+- For the Asana adapter, `tracker.provider.api_key` reads from `ASANA_PAT` when unset or when value
+  is `$ASANA_PAT`.
 - Do not put a literal tracker token in a repo-owned `WORKFLOW.md` if Codex can read that
   workspace. Use `$VAR`/host-side secret references so Symphony can keep the token out of the
   child environment.
@@ -238,6 +240,36 @@ codex:
   `tracker_payload`, and missing cursors to `tracker_pagination`; logs and tool responses carry the
   human-readable provider detail.
 
+### Asana adapter profile
+
+- Config: use `tracker.kind: asana` with required `tracker.provider.project_gid`, optional
+  `endpoint` (default `https://app.asana.com/api/1.0`), and `api_key` (defaults to `ASANA_PAT` and
+  accepts `$VAR`). Keep explicit nonblank `active_states` and `terminal_states` under `tracker`;
+  their values are the configured project's section names.
+- Scope and paging: candidate reads list tasks in the configured project with Asana offset
+  pagination and filter the normalized section name. ID refreshes fetch each task by GID, omit
+  deleted tasks and tasks no longer in the configured project, and fail malformed in-scope records.
+  Empty state/ID lists return `{:ok, []}` without an Asana request.
+- Identity and normalization: `issue.id` is the task GID, `issue.identifier` is route-safe
+  `ASANA-<gid>`, and `issue.native_ref` carries task, project, and section GIDs. State is the
+  configured-project membership's section name; notes, permalink, assignee GID, tags, and RFC 3339
+  timestamps map onto the generic issue. Tags are trimmed, lowercased, deduplicated, and blanks are
+  dropped.
+- Dispatchability: incomplete non-section task records are dispatchable. The generic scheduler
+  then applies active/terminal states, required labels, claims, retries, and concurrency.
+- Tool: the adapter advertises `asana_api`, accepting `method`, a relative Asana REST `path`, an
+  optional object `query`, and optional JSON `body`. Symphony forwards the body unchanged,
+  executes the request host-side with the session-bound endpoint/token, preserves REST
+  status/body in the tool result, and strips `ASANA_PAT` plus any configured `$VAR` token name from
+  the Codex child. Project scope applies to scheduler reads, not raw tool calls.
+- Responsibility and errors: `asana_api` adds no idempotency, retry, or scope policy; workflows own
+  provider-specific mutations and error handling. Read/config failures use
+  `{:error, :missing_asana_api_key}`, `{:error, :missing_asana_project_gid}`,
+  `{:error, :invalid_asana_endpoint}`, `{:error, {:asana_api_status, status}}`,
+  `{:error, {:asana_api_request, reason}}`, `{:error, :asana_unknown_payload}`, or
+  `{:error, :asana_missing_next_page_offset}`. Tool results use the same `success`/JSON `output`/
+  text `contentItems` shape as other provider-native tools.
+
 ## Web dashboard
 
 The observability UI now runs on a minimal Phoenix stack:
@@ -290,6 +322,21 @@ Set `SYMPHONY_LIVE_SSH_WORKER_HOSTS` if you want `make e2e` to target real SSH h
 The live test creates a temporary Linear project and issue, writes a temporary `WORKFLOW.md`, runs
 a real agent turn, verifies the workspace side effect, requires Codex to comment on and close the
 Linear issue, then marks the project completed so the run remains visible in Linear.
+
+Run the opt-in Asana live E2E separately when you want Symphony to create and delete a disposable
+project, sections, and task while exercising a real `codex app-server` session:
+
+```bash
+cd elixir
+export ASANA_PAT=...
+export SYMPHONY_LIVE_ASANA_WORKSPACE_GID=...
+# Required only when the workspace is an organization:
+# export SYMPHONY_LIVE_ASANA_TEAM_GID=...
+SYMPHONY_RUN_ASANA_LIVE_E2E=1 mix test test/symphony_elixir/asana_live_e2e_test.exs
+```
+
+The Asana live test verifies both tracker reads, a workspace file proving the child did not inherit
+`ASANA_PAT`, a real `asana_api` comment, section move, completion, direct API readback, and cleanup.
 
 ## FAQ
 
