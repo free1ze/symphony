@@ -25,6 +25,15 @@ included Linear adapter serves `linear_graphql` so repo skills can make raw Line
 Symphony executes that tool with its configured auth and removes `LINEAR_API_KEY` from the Codex
 child environment, so the agent does not need a second tracker login.
 
+After Codex starts a thread, Symphony saves a small issue-to-thread binding in the retained
+workspace's Git metadata (`symphony-thread.json`), or `.symphony/thread.json` for a non-Git
+workspace. A later retry, Rework dispatch, or orchestrator restart uses `thread/resume` when the
+issue ID, identifier, normalized issue labels (used as a conservative routing fingerprint),
+workspace path, and worker host still match. Issue state, description, and comments may change
+without breaking the binding; the resumed thread receives a freshly rendered first-turn prompt so
+it can read the latest task context. An issue-label/workspace/host change, invalid state file, or
+failed Codex resume starts a new thread and replaces the binding.
+
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
 

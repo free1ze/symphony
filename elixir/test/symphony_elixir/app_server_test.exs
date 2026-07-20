@@ -1575,4 +1575,108 @@ defmodule SymphonyElixir.AppServerTest do
       File.rm_rf(test_root)
     end
   end
+
+  test "resumes an existing thread with current workspace policies" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-resume-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-RESUME")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex.trace")
+
+      File.mkdir_p!(workspace)
+      System.put_env("SYMP_TEST_CODEX_RESUME_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CODEX_RESUME_TRACE") end)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEX_RESUME_TRACE:-/tmp/codex-resume.trace}"
+      while IFS= read -r line; do
+        printf '%s\n' "$line" >> "$trace_file"
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/resume"'*)
+            printf '%s\n' '{"id":4,"result":{"thread":{"id":"thread-existing"}}}'
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      assert {:ok, session} = AppServer.start_session(workspace, thread_id: "thread-existing")
+      assert session.thread_id == "thread-existing"
+      AppServer.stop_session(session)
+
+      payloads =
+        trace_file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(&Jason.decode!/1)
+
+      refute Enum.any?(payloads, &(&1["method"] == "thread/start"))
+
+      assert resume_payload = Enum.find(payloads, &(&1["method"] == "thread/resume"))
+      assert get_in(resume_payload, ["params", "threadId"]) == "thread-existing"
+      assert get_in(resume_payload, ["params", "cwd"]) == session.workspace
+      assert get_in(resume_payload, ["params", "sandbox"]) == "workspace-write"
+      refute Map.has_key?(resume_payload["params"], "dynamicTools")
+    after
+      System.delete_env("SYMP_TEST_CODEX_RESUME_TRACE")
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "tags thread resume protocol failures for the caller" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-resume-failure-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-RESUME-FAIL")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        case "$line" in
+          *'"method":"initialize"'*)
+            printf '%s\n' '{"id":1,"result":{}}'
+            ;;
+          *'"method":"thread/resume"'*)
+            printf '%s\n' '{"id":4,"error":{"code":-32001,"message":"thread not found"}}'
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      assert {:error, {:thread_resume_failed, "thread-stale", {:response_error, %{"code" => -32_001, "message" => "thread not found"}}}} =
+               AppServer.start_session(workspace, thread_id: "thread-stale")
+    after
+      File.rm_rf(test_root)
+    end
+  end
 end
