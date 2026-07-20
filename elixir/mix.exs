@@ -23,6 +23,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.CLI,
           SymphonyElixir.Codex.AppServer,
           SymphonyElixir.Codex.DynamicTool,
+          SymphonyElixir.Codex.ThreadState,
           SymphonyElixir.HttpServer,
           SymphonyElixir.StatusDashboard,
           SymphonyElixir.LogFile,

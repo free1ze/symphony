@@ -672,6 +672,13 @@ Important nuance:
 - Once the worker exits normally, the orchestrator still schedules a short continuation retry
   (about 1 second) so it can re-check whether the issue remains active and needs another worker
   session.
+- Across worker sessions, an implementation SHOULD persist a small thread binding with the retained
+  workspace and resume it when the issue identity, normalized issue labels used as a conservative
+  routing fingerprint, workspace path, and worker host are unchanged.
+- A resumed worker's first turn SHOULD still use the full, freshly rendered issue prompt so current
+  tracker comments, task routing, and workflow instructions are re-read.
+- If the binding is missing, invalid, no longer matches, or the targeted protocol rejects the
+  resume, the worker SHOULD create a new thread and replace the binding after successful startup.
 
 ### 7.2 Run Attempt Lifecycle
 
@@ -1009,6 +1016,16 @@ Session identifiers:
 - Extract `turn_id` from each turn identity returned by the targeted Codex app-server protocol.
 - Emit `session_id = "<thread_id>-<turn_id>"`
 - Reuse the same `thread_id` for all continuation turns inside one worker run
+- Persist the thread binding outside tracked worktree files so it survives worker exit without
+  creating repository changes. Git metadata is preferred for Git workspaces; a hidden workspace
+  state file is acceptable for non-Git workspaces.
+- Resume a persisted thread across worker sessions only when the stored issue ID, issue identifier,
+  normalized issue labels used as a conservative routing fingerprint, workspace path, and worker
+  host all match the current dispatch.
+- Treat issue state, issue description, issue comments, and other mutable task content as fresh
+  prompt inputs rather than thread-identity fields.
+- If thread resume fails at the protocol layer, start a new thread. Do not reinterpret unrelated
+  process startup, configuration, or authentication failures as resume failures.
 
 ### 10.3 Streaming Turn Processing
 
@@ -1689,17 +1706,19 @@ API design notes:
 
 Current design is intentionally in-memory for scheduler state.
 Restart recovery means the service can resume useful operation by polling tracker state and reusing
-preserved workspaces. It does not mean retry timers, running sessions, or live worker state survive
-process restart.
+preserved workspaces. A workspace MAY retain the identity of a resumable coding-agent thread, but
+retry timers, live app-server processes, running turns, and worker state do not survive process
+restart.
 
 After restart:
 
 - No retry timers are restored from prior process memory.
-- No running sessions are assumed recoverable.
+- No live app-server session or running turn is assumed recoverable.
 - Service recovers by:
   - startup terminal workspace cleanup
   - fresh polling of active issues
   - re-dispatching eligible work
+  - conditionally resuming a persisted coding-agent thread according to Section 10.2
 
 ### 14.4 Operator Intervention Points
 

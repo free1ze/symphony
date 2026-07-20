@@ -10,6 +10,11 @@ _In this [demo video](https://player.vimeo.com/video/1186371009?h=5626e4b899), S
 > [!WARNING]
 > Symphony is a low-key engineering preview for testing in trusted environments.
 
+The reference implementation preserves each eligible issue's Codex thread alongside its retained
+workspace. Rework and retry dispatches resume that thread when the issue identity, issue labels,
+workspace, and worker host still match; otherwise, or if Codex can no longer resume it, Symphony
+starts a new thread.
+
 ## Running Symphony
 
 ### Requirements

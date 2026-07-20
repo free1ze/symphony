@@ -4,7 +4,7 @@ defmodule SymphonyElixir.AgentRunner do
   """
 
   require Logger
-  alias SymphonyElixir.Codex.AppServer
+  alias SymphonyElixir.Codex.{AppServer, ThreadState}
   alias SymphonyElixir.{Config, PromptBuilder, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
@@ -88,13 +88,52 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issues_by_ids/1)
+    resume_candidate = ThreadState.resume_candidate(workspace, issue, worker_host)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+    with {:ok, session} <- start_codex_session(workspace, issue, worker_host, resume_candidate) do
+      persist_thread_state(workspace, issue, session.thread_id, worker_host)
+
       try do
         do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
         AppServer.stop_session(session)
       end
+    end
+  end
+
+  defp start_codex_session(workspace, issue, worker_host, {:resume, thread_id}) do
+    Logger.info("Resuming Codex thread for #{issue_context(issue)} thread_id=#{thread_id}")
+
+    case AppServer.start_session(workspace, worker_host: worker_host, thread_id: thread_id) do
+      {:error, {:thread_resume_failed, ^thread_id, reason}} ->
+        Logger.warning("Codex thread resume failed for #{issue_context(issue)} thread_id=#{thread_id}; starting a new thread: #{inspect(reason)}")
+
+        AppServer.start_session(workspace, worker_host: worker_host)
+
+      result ->
+        result
+    end
+  end
+
+  defp start_codex_session(workspace, issue, worker_host, {:start, reason}) do
+    unless reason in [:state_missing, :missing_issue_id, :missing_issue_identifier] do
+      Logger.info("Starting a new Codex thread for #{issue_context(issue)} because saved thread state is not reusable: #{inspect(reason)}")
+    end
+
+    AppServer.start_session(workspace, worker_host: worker_host)
+  end
+
+  defp persist_thread_state(workspace, issue, thread_id, worker_host) do
+    case ThreadState.persist(workspace, issue, thread_id, worker_host) do
+      :ok ->
+        :ok
+
+      {:error, reason} when reason in [:missing_issue_id, :missing_issue_identifier] ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Could not persist Codex thread state for #{issue_context(issue)} thread_id=#{thread_id}: #{inspect(reason)}")
+        :ok
     end
   end
 

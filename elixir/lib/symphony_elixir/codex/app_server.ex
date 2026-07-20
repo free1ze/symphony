@@ -9,6 +9,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
+  @thread_resume_id 4
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
@@ -41,6 +42,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
     dynamic_tool_binding = DynamicTool.bind()
+    requested_thread_id = Keyword.get(opts, :thread_id)
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
          {:ok, port} <- start_port(expanded_workspace, worker_host, dynamic_tool_binding) do
@@ -48,7 +50,13 @@ defmodule SymphonyElixir.Codex.AppServer do
 
       with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
            {:ok, thread_id} <-
-             do_start_session(port, expanded_workspace, session_policies, dynamic_tool_binding) do
+             do_start_session(
+               port,
+               expanded_workspace,
+               session_policies,
+               requested_thread_id,
+               dynamic_tool_binding
+             ) do
         {:ok,
          %{
            port: port,
@@ -306,12 +314,26 @@ defmodule SymphonyElixir.Codex.AppServer do
     Config.codex_runtime_settings(workspace, remote: true)
   end
 
-  defp do_start_session(port, workspace, session_policies, dynamic_tool_binding) do
+  defp do_start_session(port, workspace, session_policies, nil, dynamic_tool_binding) do
     case send_initialize(port) do
       :ok -> start_thread(port, workspace, session_policies, dynamic_tool_binding)
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp do_start_session(port, workspace, session_policies, thread_id, _dynamic_tool_binding)
+       when is_binary(thread_id) do
+    with :ok <- validate_thread_id(thread_id),
+         :ok <- send_initialize(port) do
+      case resume_thread(port, workspace, session_policies, thread_id) do
+        {:ok, resumed_thread_id} -> {:ok, resumed_thread_id}
+        {:error, reason} -> {:error, {:thread_resume_failed, thread_id, reason}}
+      end
+    end
+  end
+
+  defp do_start_session(_port, _workspace, _session_policies, thread_id, _dynamic_tool_binding),
+    do: {:error, {:invalid_thread_id, thread_id}}
 
   defp start_thread(
          port,
@@ -339,6 +361,39 @@ defmodule SymphonyElixir.Codex.AppServer do
 
       other ->
         other
+    end
+  end
+
+  defp resume_thread(
+         port,
+         workspace,
+         %{approval_policy: approval_policy, thread_sandbox: thread_sandbox},
+         thread_id
+       ) do
+    send_message(port, %{
+      "method" => "thread/resume",
+      "id" => @thread_resume_id,
+      "params" => %{
+        "threadId" => thread_id,
+        "approvalPolicy" => approval_policy,
+        "sandbox" => thread_sandbox,
+        "cwd" => workspace
+      }
+    })
+
+    case await_response(port, @thread_resume_id) do
+      {:ok, %{"thread" => %{"id" => ^thread_id}}} -> {:ok, thread_id}
+      {:ok, %{"thread" => thread_payload}} -> {:error, {:invalid_thread_payload, thread_payload}}
+      {:ok, response_payload} -> {:error, {:invalid_thread_resume_payload, response_payload}}
+      other -> other
+    end
+  end
+
+  defp validate_thread_id(thread_id) when is_binary(thread_id) do
+    if String.trim(thread_id) == "" do
+      {:error, :invalid_thread_id}
+    else
+      :ok
     end
   end
 
