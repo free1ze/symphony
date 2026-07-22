@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Add an unattended browser surface without changing the user's installed
+# plugin availability. The workflow explicitly selects this Playwright server
+# for isolated local UI evidence.
+exec codex \
+  --config 'mcp_servers.playwright.command="npx"' \
+  --config 'mcp_servers.playwright.args=["--offline","--yes","@playwright/mcp@0.0.78","--headless","--isolated","--browser","chrome","--output-dir",".symphony/artifacts/browser","--output-max-size","52428800","--viewport-size","1440x1000"]' \
+  --config 'mcp_servers.playwright.startup_timeout_sec=60' \
+  --config 'mcp_servers.playwright.tool_timeout_sec=180' \
+  --config 'mcp_servers.playwright.required=true' \
+  --config 'mcp_servers.playwright.default_tools_approval_mode="approve"' \
+  "$@"
