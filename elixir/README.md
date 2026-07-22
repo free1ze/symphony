@@ -79,9 +79,10 @@ app. For local UI testing and screenshots, prepare the repository's unattended C
 ../scripts/codex-symphony mcp list
 ```
 
-The launcher disables the desktop Browser and Chrome plugins for Symphony workers and starts a
-pinned Playwright MCP server in headless, isolated mode. Each worker gets a temporary browser
-profile, and browser artifacts are written relative to its issue workspace under
+The launcher preserves existing plugins and adds a pinned Playwright MCP server in headless,
+isolated mode. The workflow should explicitly select Playwright for unattended local UI evidence;
+other tasks retain their normal plugin capabilities. Each worker gets a temporary browser profile,
+and browser artifacts are written relative to its issue workspace under
 `.symphony/artifacts/browser/`. The preparation step warms the pinned npm package once; worker
 launches use the cached package in offline mode.
 

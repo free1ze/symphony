@@ -29,10 +29,13 @@ if ! jq -e 'any(.[]; .name == "playwright" and .enabled == true)' <<< "$mcp_conf
   exit 1
 fi
 
-if ! jq -e 'any(.[]; .name == "node_repl" and .enabled == false)' <<< "$mcp_config" >/dev/null; then
-  printf 'The Symphony Codex launcher did not disable the interactive browser runtime.\n' >&2
+base_plugin_state="$(codex plugin list --json | jq -c '[.installed[] | {pluginId, enabled}] | sort_by(.pluginId)')"
+launcher_plugin_state="$($codex_launcher plugin list --json | jq -c '[.installed[] | {pluginId, enabled}] | sort_by(.pluginId)')"
+if [[ "$launcher_plugin_state" != "$base_plugin_state" ]]; then
+  printf 'The Symphony Codex launcher changed installed plugin availability.\n' >&2
   exit 1
 fi
 
 printf 'Prepared Playwright MCP: %s\n' "$playwright_mcp_package"
+printf 'Preserved installed plugin availability.\n'
 printf 'Verified Symphony Codex launcher: %s\n' "$codex_launcher"
