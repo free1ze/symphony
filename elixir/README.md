@@ -69,6 +69,33 @@ mise install
 mise exec -- elixir --version
 ```
 
+### Unattended browser evidence
+
+An app-server worker does not inherit an interactive browser opened in the ChatGPT or Codex desktop
+app. For local UI testing and screenshots, prepare the repository's unattended Codex launcher:
+
+```bash
+../scripts/prepare-symphony-browser
+../scripts/codex-symphony mcp list
+```
+
+The launcher disables the desktop Browser and Chrome plugins for Symphony workers and starts a
+pinned Playwright MCP server in headless, isolated mode. Each worker gets a temporary browser
+profile, and browser artifacts are written relative to its issue workspace under
+`.symphony/artifacts/browser/`. The preparation step warms the pinned npm package once; worker
+launches use the cached package in offline mode.
+
+Use the launcher in the workflow's Codex command:
+
+```yaml
+codex:
+  command: /path/to/symphony/scripts/codex-symphony app-server
+```
+
+This setup is intended for trusted local or test pages. It does not reuse personal cookies or login
+state, and browser automation should remain inside the workflow's existing environment and data
+safety boundaries.
+
 ## Run
 
 ```bash

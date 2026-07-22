@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+playwright_mcp_package='@playwright/mcp@0.0.78'
+chrome_binary='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+codex_launcher="$repo_root/scripts/codex-symphony"
+
+for command_name in node npm npx codex jq; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    printf 'Missing required command: %s\n' "$command_name" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -x "$chrome_binary" ]]; then
+  printf 'Google Chrome is required at %s\n' "$chrome_binary" >&2
+  exit 1
+fi
+
+# Fetch the pinned package once while setup has network access. Worker launches
+# use npx --offline so browser availability does not depend on npm at run time.
+npx --yes --package "$playwright_mcp_package" playwright-mcp --version >/dev/null
+npx --offline --yes "$playwright_mcp_package" --version >/dev/null
+
+mcp_config="$($codex_launcher mcp list --json)"
+if ! jq -e 'any(.[]; .name == "playwright" and .enabled == true)' <<< "$mcp_config" >/dev/null; then
+  printf 'The Symphony Codex launcher did not expose an enabled Playwright MCP server.\n' >&2
+  exit 1
+fi
+
+if ! jq -e 'any(.[]; .name == "node_repl" and .enabled == false)' <<< "$mcp_config" >/dev/null; then
+  printf 'The Symphony Codex launcher did not disable the interactive browser runtime.\n' >&2
+  exit 1
+fi
+
+printf 'Prepared Playwright MCP: %s\n' "$playwright_mcp_package"
+printf 'Verified Symphony Codex launcher: %s\n' "$codex_launcher"

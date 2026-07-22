@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Keep unattended Symphony workers independent from desktop browser sessions.
+# These CLI overrides are used instead of a Codex profile because current Codex
+# management/runtime commands do not consistently merge MCP tables from profile
+# files.
+exec codex \
+  --disable plugins \
+  --config 'plugins."browser@openai-bundled".enabled=false' \
+  --config 'plugins."chrome@openai-bundled".enabled=false' \
+  --config 'mcp_servers.node_repl.enabled=false' \
+  --config 'mcp_servers.playwright.command="npx"' \
+  --config 'mcp_servers.playwright.args=["--offline","--yes","@playwright/mcp@0.0.78","--headless","--isolated","--browser","chrome","--output-dir",".symphony/artifacts/browser","--output-max-size","52428800","--viewport-size","1440x1000"]' \
+  --config 'mcp_servers.playwright.startup_timeout_sec=60' \
+  --config 'mcp_servers.playwright.tool_timeout_sec=180' \
+  --config 'mcp_servers.playwright.required=true' \
+  --config 'mcp_servers.playwright.default_tools_approval_mode="approve"' \
+  "$@"
